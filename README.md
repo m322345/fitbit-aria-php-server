@@ -126,7 +126,7 @@ The examples below are indicative (adapt them to your setup). Two DNS names are 
 ```apache
 <VirtualHost *:80>
     ServerName www.fitbit.com
-    DocumentRoot /var/www/www_root
+    DocumentRoot /var/www/aria
     RewriteEngine On
     # Balance : uniquement ces deux chemins
     RewriteRule ^/scale/(register|upload)$ /aria.php [L]
@@ -136,7 +136,7 @@ The examples below are indicative (adapt them to your setup). Two DNS names are 
 
 <VirtualHost *:443>
     ServerName fitbit.yourdomain.com
-    DocumentRoot /var/www/www_root
+    DocumentRoot /var/www/aria
     DirectoryIndex pesees.php
     SSLEngine on
     SSLCertificateFile /etc/ssl/certs/cert_fullchain.crt
