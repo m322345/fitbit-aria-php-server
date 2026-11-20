@@ -53,6 +53,20 @@ const USERS_FILE = DATA_DIR . '/users.json';
 // Clés des pesées supprimées : la balance les renvoie parfois, elles ne doivent pas revenir.
 const DELETED_FILE = DATA_DIR . '/deleted_keys.txt';
 
+// Réglages globaux (Pushover, alerte batterie) et état des balances, modifiables depuis admin.php.
+const SETTINGS_FILE = DATA_DIR . '/settings.json';
+// API Pushover (modifiable pour un serveur de test).
+const PUSHOVER_URL = 'https://api.pushover.net/1/messages.json';
+const SETTINGS_DEFAULTS = [
+    'pushover_enabled'      => false,
+    'pushover_app_token'    => '',
+    'battery_alert_enabled' => false,
+    'battery_threshold'     => 20,    // % : alerte quand le niveau est inférieur ou égal
+    'battery_user_key'      => '',    // clé Pushover (utilisateur ou groupe) destinataire de l'alerte
+    'ui_url'                => '',    // URL de l'interface web, jointe aux notifications de pesée (facultatif)
+    'scales'                => [],    // état par balance : battery, seen, alerted
+];
+
 const CSV_HEADER = ['timestamp', 'datetime', 'aria_timestamp', 'weight_g',
                     'weight_kg', 'impedance', 'fat1', 'covariance', 'fat2'];
 
@@ -410,7 +424,7 @@ function parse_user_input(array $in, ?int $editingId, array $allUsers): array
         }
     }
 
-    return [
+    return parse_push_input($in) + [
         'name'             => $name,
         'admin'            => !empty($in['admin']),
         'on_scale'         => $onScale,
@@ -419,6 +433,173 @@ function parse_user_input(array $in, ?int $editingId, array $allUsers): array
         'gender'           => (($in['gender'] ?? 'm') === 'f') ? 0x00 : 0x02,
         'height_mm'        => $height * 10,
     ];
+}
+
+/* ---------- Réglages globaux et Pushover ---------- */
+
+function settings_read(): array
+{
+    $d = is_file(SETTINGS_FILE) ? json_decode((string)file_get_contents(SETTINGS_FILE), true) : null;
+    return array_replace(SETTINGS_DEFAULTS, is_array($d) ? $d : []);
+}
+
+/** Lecture + modification + écriture sous verrou exclusif ($fn reçoit les réglages par référence). */
+function settings_update(callable $fn): mixed
+{
+    $lock = fopen(DATA_DIR . '/.settings.lock', 'c');
+    if ($lock === false) {
+        throw new RuntimeException('Impossible de verrouiller ' . DATA_DIR);
+    }
+    flock($lock, LOCK_EX);
+    try {
+        $s = settings_read();
+        $result = $fn($s);
+        $tmp = SETTINGS_FILE . '.tmp';
+        $json = json_encode($s, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($json === false || file_put_contents($tmp, $json, LOCK_EX) === false || !rename($tmp, SETTINGS_FILE)) {
+            throw new RuntimeException('Écriture de settings.json impossible (droits sur ' . DATA_DIR . ' ?)');
+        }
+        @chmod(SETTINGS_FILE, 0640);
+        return $result;
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+}
+
+/** Clé utilisateur / groupe / jeton d'application Pushover : 30 lettres et chiffres. */
+function pushover_key_valid(string $k): bool
+{
+    return (bool)preg_match('/^[A-Za-z0-9]{30}$/', $k);
+}
+
+/**
+ * Champs Pushover d'un utilisateur, validés : clé (id Pushover), appareil (optionnel),
+ * et envoi d'une notification à chaque nouvelle pesée.
+ */
+function parse_push_input(array $in): array
+{
+    $key = trim((string)($in['pushover_key'] ?? ''));
+    if ($key !== '' && !pushover_key_valid($key)) {
+        throw new InvalidArgumentException('Clé Pushover invalide : 30 lettres et chiffres.');
+    }
+    $dev = trim((string)($in['pushover_device'] ?? ''));
+    if ($dev !== '' && !preg_match('/^[A-Za-z0-9_-]{1,25}$/', $dev)) {
+        throw new InvalidArgumentException('Nom d\'appareil Pushover invalide (25 caractères max. : lettres, chiffres, - ou _).');
+    }
+    return [
+        'pushover_key'    => $key,
+        'pushover_device' => $dev,
+        'notify_weighing'    => !empty($in['notify_weighing']),
+        'notify_hide_values' => !empty($in['notify_hide_values']),   // pas de poids ni de masse grasse dans la notification
+        'notify_link'        => !empty($in['notify_link']),          // joindre le lien vers l'interface
+    ];
+}
+
+/** Pushover est-il utilisable (activé et jeton d'application renseigné) ? */
+function pushover_ready(?array $s = null): bool
+{
+    $s ??= settings_read();
+    return !empty($s['pushover_enabled']) && pushover_key_valid((string)$s['pushover_app_token']);
+}
+
+/** URL de l'interface valide (http/https, 512 caractères max.) ? */
+function ui_url_valid(string $u): bool
+{
+    return strlen($u) <= 512 && (bool)preg_match('#^https?://#i', $u) && filter_var($u, FILTER_VALIDATE_URL) !== false;
+}
+
+/** Lien à joindre à la notification d'un utilisateur : URL configurée par l'admin, si l'utilisateur l'a demandée. */
+function user_push_link(array $u, ?array $s = null): ?string
+{
+    $s ??= settings_read();
+    $url = trim((string)$s['ui_url']);
+    return !empty($u['notify_link']) && $url !== '' && ui_url_valid($url) ? $url : null;
+}
+
+/** Cet utilisateur reçoit-il une notification à chaque pesée ? */
+function user_wants_weighing_push(array $u): bool
+{
+    return ($u['pushover_key'] ?? '') !== '' && ($u['notify_weighing'] ?? false);
+}
+
+/**
+ * Envoie une notification Pushover. Renvoie true si Pushover l'a acceptée ;
+ * sinon false, avec la raison dans $GLOBALS['pushover_error'].
+ */
+function pushover_send(string $userKey, string $title, string $message, ?string $device = null, ?int $timestamp = null,
+                       ?string $url = null, ?string $urlTitle = null): bool
+{
+    $GLOBALS['pushover_error'] = '';
+    $s = settings_read();
+    if (!pushover_ready($s)) {
+        $GLOBALS['pushover_error'] = 'Pushover est désactivé ou le jeton d\'application est manquant.';
+        return false;
+    }
+    if (!pushover_key_valid($userKey)) {
+        $GLOBALS['pushover_error'] = 'Clé Pushover du destinataire absente ou invalide.';
+        return false;
+    }
+    $fields = [
+        'token'   => $s['pushover_app_token'],
+        'user'    => $userKey,
+        'title'   => mb_substr($title, 0, 250),
+        'message' => mb_substr($message, 0, 1024),
+    ];
+    if ($device !== null && $device !== '') {
+        $fields['device'] = $device;
+    }
+    if ($timestamp !== null && $timestamp > 0) {
+        $fields['timestamp'] = (string)$timestamp;
+    }
+    if ($url !== null && $url !== '') {
+        $fields['url'] = $url;
+        $fields['url_title'] = mb_substr($urlTitle ?: 'Ouvrir', 0, 100);
+    }
+    $body = http_build_query($fields);
+    $code = 0;
+    $resp = '';
+    if (function_exists('curl_init')) {
+        $ch = curl_init(PUSHOVER_URL);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 4,
+            CURLOPT_TIMEOUT        => 8,
+        ]);
+        $resp = (string)curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $err  = curl_error($ch);
+        curl_close($ch);
+        if ($code === 0) {
+            $GLOBALS['pushover_error'] = 'Connexion à Pushover impossible' . ($err !== '' ? ' (' . $err . ')' : '') . '.';
+            error_log('aria: pushover : ' . $GLOBALS['pushover_error']);
+            return false;
+        }
+    } else {
+        $ctx = stream_context_create(['http' => [
+            'method' => 'POST', 'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
+            'content' => $body, 'timeout' => 8, 'ignore_errors' => true,
+        ]]);
+        $resp = (string)@file_get_contents(PUSHOVER_URL, false, $ctx);
+        if (isset($http_response_header[0]) && preg_match('/ (\d{3})/', $http_response_header[0], $m)) {
+            $code = (int)$m[1];
+        }
+        if ($code === 0) {
+            $GLOBALS['pushover_error'] = 'Connexion à Pushover impossible.';
+            error_log('aria: pushover : ' . $GLOBALS['pushover_error']);
+            return false;
+        }
+    }
+    $json = json_decode($resp, true);
+    if ($code === 200 && ($json['status'] ?? 0) === 1) {
+        return true;
+    }
+    $reasons = is_array($json['errors'] ?? null) ? implode(' ; ', $json['errors']) : '';
+    $GLOBALS['pushover_error'] = 'Refusé par Pushover (HTTP ' . $code . ')' . ($reasons !== '' ? ' : ' . $reasons : '') . '.';
+    error_log('aria: pushover : ' . $GLOBALS['pushover_error']);
+    return false;
 }
 
 /** Première utilisation : importe $SEED_USERS et crée le compte admin par défaut. */

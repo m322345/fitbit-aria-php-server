@@ -15,6 +15,7 @@ require_once __DIR__ . '/lib.php';
 
 const EXCHANGE_LOG = DATA_DIR . '/exchanges.log';
 
+ignore_user_abort(true);   // la balance peut couper la connexion : les notifications partent quand même
 $rawRequest = file_get_contents('php://input');   // corps lu une seule fois
 $GLOBALS['aria_response'] = '';                   // corps de la réponse envoyée
 $GLOBALS['aria_decoded']  = [];                   // version lisible (en-tête, pesées)
@@ -103,6 +104,7 @@ foreach ($USERS as $u) {
     $refs[$u['id']] = reference_weight($u);
 }
 $perFile = [];   // chemin CSV => lignes
+$fileUser = [];  // chemin CSV => utilisateur (pour les notifications)
 $known = all_known_keys();   // pesées déjà enregistrées (chez n'importe quel propriétaire)
 
 for ($i = 0; $i < $h['count']; $i++) {
@@ -138,6 +140,9 @@ for ($i = 0; $i < $h['count']; $i++) {
         'fat1_pct'    => $m['fat1'] / 1000, // fat1 est en millièmes de pourcent (27921 = 27,921 %)
     ];
 
+    if ($user !== null) {
+        $fileUser[csv_path($user)] = $user;
+    }
     $perFile[csv_path($user)][] = [
         'timestamp'      => $realTs,
         'datetime'       => date('Y-m-d H:i:s', $realTs),
@@ -155,6 +160,21 @@ if (!is_dir(DATA_DIR) && !mkdir(DATA_DIR, 0750, true) && !is_dir(DATA_DIR)) {
     error_log('aria: impossible de créer ' . DATA_DIR);
     http_response_code(500);
     exit;
+}
+
+// Notifications de pesée : une par utilisateur et par envoi (la plus récente), calculée AVANT
+// l'enregistrement pour pouvoir comparer avec la pesée précédente.
+$pushPlan = [];
+foreach ($perFile as $file => $rows) {
+    $u = $fileUser[$file] ?? null;
+    if ($u === null) {
+        continue;
+    }
+    usort($rows, fn($a, $b) => $a['timestamp'] <=> $b['timestamp']);
+    $latest = end($rows);
+    $prevW = count($rows) > 1 ? (int)$rows[count($rows) - 2]['weight_g']
+                              : (($l = last_known($u)) ? (int)$l['weight_g'] : null);
+    $pushPlan[] = ['user' => $u, 'count' => count($rows), 'row' => $latest, 'prev' => $prevW];
 }
 
 // Verrou global pour éviter les écritures concurrentes
@@ -223,3 +243,78 @@ $GLOBALS['aria_decoded']['users_sent'] = $sentRefs;
 header('Content-Type: application/octet-stream');
 header('Content-Length: ' . strlen($resp));
 echo $resp;
+
+/* ---------- Après la réponse : notifications Pushover et état de la batterie ---------- */
+// La balance a sa réponse ; l'appel à Pushover ne la retarde pas.
+if (function_exists('fastcgi_finish_request')) {
+    fastcgi_finish_request();
+} else {
+    @ob_flush();
+    flush();
+}
+
+$GLOBALS['aria_decoded']['pushover'] = [];
+$fmtKg = fn(int $g): string => number_format($g / 1000, 1, ',', ' ');
+try {
+    $cfg = settings_read();
+
+    // 1. Nouvelle pesée -> son propriétaire
+    if (pushover_ready($cfg)) {
+        foreach ($pushPlan as $p) {
+            $u = $p['user'];
+            if (!user_wants_weighing_push($u)) {
+                continue;
+            }
+            if (!empty($u['notify_hide_values'])) {
+                $text = 'Une nouvelle pesée a été enregistrée.';     // valeurs masquées à la demande de l'utilisateur
+            } else {
+                $w = (int)$p['row']['weight_g'];
+                $text = $fmtKg($w) . ' kg';
+                if ($p['prev'] !== null) {
+                    $d = $w - $p['prev'];
+                    $text .= ' (' . ($d >= 0 ? '+' : '−') . $fmtKg(abs($d)) . ' kg)';
+                }
+                $fat = (int)$p['row']['fat1'];
+                if ($fat > 0) {
+                    $text .= "\nMasse grasse : " . number_format($fat / 1000, 2, ',', ' ') . ' %';
+                }
+            }
+            if ($p['count'] > 1) {
+                $text .= "\n(" . $p['count'] . ' pesées reçues, la plus récente est affichée)';
+            }
+            $ok = pushover_send($u['pushover_key'], 'Nouvelle pesée', $text,
+                                ($u['pushover_device'] ?? '') ?: null, (int)$p['row']['timestamp'],
+                                ($link = user_push_link($u, $cfg)), $link ? 'Voir mes pesées' : null);
+            $GLOBALS['aria_decoded']['pushover'][] = ['type' => 'pesée', 'user' => $u['name'], 'sent' => $ok,
+                                                      'error' => $ok ? '' : $GLOBALS['pushover_error']];
+        }
+    }
+
+    // 2. Batterie : mémorisation du niveau et alerte au passage sous le seuil (une seule fois)
+    $bat = (int)$h['battery'];
+    if ($bat >= 0 && $bat <= 100) {
+        $mac = (string)$h['mac'];
+        $threshold = max(1, min(99, (int)$cfg['battery_threshold']));
+        $alerted = !empty($cfg['scales'][$mac]['alerted']);
+        $sentNow = false;
+        if (!empty($cfg['battery_alert_enabled']) && pushover_ready($cfg) && !$alerted && $bat <= $threshold) {
+            $sentNow = pushover_send((string)$cfg['battery_user_key'], 'Batterie de la balance faible',
+                'Niveau : ' . $bat . ' % (seuil : ' . $threshold . ' %). Pensez à changer les piles.' . "\nBalance : " . $mac);
+            $GLOBALS['aria_decoded']['pushover'][] = ['type' => 'batterie', 'level' => $bat, 'sent' => $sentNow,
+                                                      'error' => $sentNow ? '' : $GLOBALS['pushover_error']];
+        }
+        settings_update(function (array &$st) use ($mac, $bat, $threshold, $sentNow) {
+            $e = $st['scales'][$mac] ?? [];
+            $e['battery'] = $bat;
+            $e['seen'] = time();
+            if ($sentNow) {
+                $e['alerted'] = true;
+            } elseif ($bat > $threshold + 5) {      // remonté (piles changées) : l'alerte pourra repartir
+                $e['alerted'] = false;
+            }
+            $st['scales'][$mac] = $e;
+        });
+    }
+} catch (Throwable $e) {
+    error_log('aria: notifications : ' . $e->getMessage());    // ne doit jamais gêner la balance
+}

@@ -4,23 +4,26 @@ Serveur PHP qui remplace le cloud Fitbit pour une balance connectée **Fitbit Ar
 
 Le protocole est décrit par le projet [micolous/helvetic](https://github.com/micolous/helvetic) (`protocol.md`), dont ce serveur s'inspire.
 
+English version: [README.md](README.md)
+
 ---
 
 ## Sommaire
 
 1. [Fonctionnalités](#fonctionnalités)
-2. [Architecture et fichiers](#architecture-et-fichiers)
-3. [Prérequis](#prérequis)
-4. [Installation](#installation)
-5. [Configuration](#configuration)
-6. [Brancher la balance](#brancher-la-balance)
-7. [Utilisation de l'interface web](#utilisation-de-linterface-web)
-8. [Stockage des données](#stockage-des-données)
-9. [Fonctionnement détaillé](#fonctionnement-détaillé)
-10. [Sécurité](#sécurité)
-11. [Sauvegarde et maintenance](#sauvegarde-et-maintenance)
-12. [Dépannage](#dépannage)
-13. [Limites connues](#limites-connues)
+2. [Captures d'écran](#captures-décran)
+3. [Architecture et fichiers](#architecture-et-fichiers)
+4. [Prérequis](#prérequis)
+5. [Installation](#installation)
+6. [Configuration](#configuration)
+7. [Brancher la balance](#brancher-la-balance)
+8. [Utilisation de l'interface web](#utilisation-de-linterface-web)
+9. [Stockage des données](#stockage-des-données)
+10. [Fonctionnement détaillé](#fonctionnement-détaillé)
+11. [Sécurité](#sécurité)
+12. [Sauvegarde et maintenance](#sauvegarde-et-maintenance)
+13. [Dépannage](#dépannage)
+14. [Limites connues](#limites-connues)
 
 ---
 
@@ -41,6 +44,15 @@ Le protocole est décrit par le projet [micolous/helvetic](https://github.com/mi
 - **Anti-doublons global** : la balance renvoie parfois ses pesées en cache. Une pesée déjà connue, déplacée ou supprimée n'est jamais recréée.
 - **Journal complet des échanges** balance ⇄ serveur (`exchanges.log`, une ligne JSON par échange : en-têtes, octets bruts en hexadécimal, version décodée, statut).
 
+### Notifications Pushover
+
+- **Nouvelle pesée** : chaque utilisateur peut recevoir une notification sur son téléphone (poids, écart avec la pesée précédente, masse grasse). Plusieurs pesées reçues dans un même envoi donnent une seule notification (la plus récente). Les invités ne reçoivent pas de notification.
+- **Batterie faible** : une alerte est envoyée quand le niveau de la batterie de la balance atteint un seuil configurable (20 % par défaut). Elle n'est envoyée qu'**une fois** ; elle peut repartir quand le niveau est remonté au-dessus du seuil + 5 % (piles changées).
+- Tout se règle depuis l'interface web, sans fichier à modifier : le **jeton d'application** Pushover, la **clé utilisateur** (et le nom d'appareil facultatif) de chaque utilisateur, le **seuil** de batterie et la **clé destinataire** (utilisateur ou groupe) de l'alerte batterie. Chaque partie peut être désactivée : globalement, alerte batterie seule, ou par utilisateur.
+- Les notifications partent **après** la réponse à la balance : Pushover ne la ralentit jamais. Les résultats (envoyé / erreur) sont consignés dans `exchanges.log`.
+- Boutons « Envoyer une notification de test » dans *Mon compte* et dans l'administration.
+- **Lien vers l'interface** : l'administrateur renseigne l'URL de l'interface utilisateur (carte Notifications Pushover). Chaque utilisateur peut, dans *Mon compte*, **joindre ce lien** à ses notifications de pesée et/ou **masquer le poids et la masse grasse** (la notification indique alors seulement qu'une pesée a été enregistrée). Ces deux options sont décochées par défaut.
+
 ### Côté web
 
 - **Page des pesées** (`pesees.php`)
@@ -59,9 +71,39 @@ Le protocole est décrit par le projet [micolous/helvetic](https://github.com/mi
   - *Utilisateur* : **basculer** une de ses pesées vers les invités ; **s'attribuer** une pesée d'invité (bouton « M'attribuer »).
   - *Administrateur* : **déplacer** n'importe quelle pesée vers n'importe quel propriétaire (invités compris) et **supprimer** une pesée (icône poubelle, avec confirmation).
   - Chaque action est contrôlée côté serveur : un utilisateur ne peut pas toucher aux pesées des autres, même en forgeant une requête (HTTP 403).
-- **Mon compte** (`compte.php`) : changement du mot de passe ; pour les utilisateurs reconnus par la balance, **profil balance** modifiable (poids de départ, taille, année de naissance, sexe), transmis à la balance à sa prochaine connexion.
-- **Administration** (`admin.php`, réservée aux administrateurs) : liste des utilisateurs, création (mot de passe provisoire saisi ou généré), modification (nom, rôle administrateur, reconnu ou non par la balance, profil), réinitialisation du mot de passe (mot de passe provisoire affiché **une seule fois**, sessions ouvertes fermées), suppression. Garde-fous : impossible de supprimer son propre compte, impossible de retirer ou supprimer le **dernier administrateur**. La suppression d'un compte conserve son historique de pesées sur le serveur.
-- **Interface responsive** : tableaux transformés en cartes sous 640 px, zones tactiles de 44 px, aucun défilement horizontal, thème clair/sombre automatique. Bandeau « Fitbit by Cédric » sur toutes les pages.
+- **Mon compte** (`compte.php`) : changement du mot de passe ; **notifications Pushover** (activation, clé utilisateur, appareil, masquage des valeurs, lien vers l'interface, test) ; pour les utilisateurs reconnus par la balance, **profil balance** modifiable (poids de départ, taille, année de naissance, sexe), transmis à la balance à sa prochaine connexion.
+- **Administration** (`admin.php`, réservée aux administrateurs) : liste des utilisateurs, création (mot de passe provisoire saisi ou généré), modification (nom, rôle administrateur, reconnu ou non par la balance, profil, clé/appareil Pushover et notification de pesée), réinitialisation du mot de passe (mot de passe provisoire affiché **une seule fois**, sessions ouvertes fermées), suppression. Une carte **Notifications Pushover** regroupe les réglages globaux (jeton d'application, alerte batterie, seuil, destinataire, URL de l'interface) et affiche le dernier niveau de batterie remonté par la balance. Garde-fous : impossible de supprimer son propre compte, impossible de retirer ou supprimer le **dernier administrateur**. La suppression d'un compte conserve son historique de pesées sur le serveur.
+- **Interface responsive** : tableaux transformés en cartes sous 640 px, zones tactiles de 44 px, aucun défilement horizontal, thème clair/sombre automatique. Bandeau « Fitbit by Cédric » et favicon de pèse-personne (aux couleurs du site, clair et sombre) sur toutes les pages.
+
+---
+
+## Captures d'écran
+
+Toutes les captures utilisent des noms et des mesures fictifs.
+
+**Pesées, ordinateur** – graphique poids et masse grasse (« Les deux »), dernières pesées, et bouton pour basculer une pesée vers les invités :
+
+![Pesées, ordinateur](docs/screenshots/weighings-desktop.png)
+
+**Pesées, téléphone** – le tableau devient une carte par pesée :
+
+<img src="docs/screenshots/weighings-mobile.png" alt="Pesées, téléphone" width="320">
+
+**Pesées, vue administrateur** – pesées d'un autre utilisateur avec les actions déplacer (liste des propriétaires) et supprimer (icône poubelle) :
+
+![Pesées, vue administrateur](docs/screenshots/weighings-admin-others.png)
+
+**Administration** – utilisateurs, et réglages des notifications Pushover (jeton, alerte batterie et seuil, URL de l'interface, dernier niveau de batterie remonté par la balance) :
+
+![Administration : utilisateurs et Pushover](docs/screenshots/admin-users-pushover.png)
+
+**Administration, modification d'un utilisateur** – profil balance, options Pushover, réinitialisation du mot de passe et suppression :
+
+![Administration : modifier un utilisateur](docs/screenshots/admin-edit-user.png)
+
+**Mon compte, notifications** – réglages Pushover propres à chaque utilisateur :
+
+![Mon compte : notifications](docs/screenshots/account-notifications.png)
 
 ---
 
@@ -69,13 +111,15 @@ Le protocole est décrit par le projet [micolous/helvetic](https://github.com/mi
 
 | Fichier | Rôle |
 |---|---|
-| `lib.php` | Configuration, CRC, lecture/écriture des CSV, déduplication, déplacement et suppression de pesées, gestion de `users.json`, construction des utilisateurs envoyés à la balance |
-| `aria.php` | Points d'accès **réservés à la balance** (`/scale/register`, `/scale/upload`) et journal des échanges |
+| `lib.php` | Configuration, CRC, lecture/écriture des CSV, déduplication, déplacement et suppression de pesées, gestion de `users.json` et `settings.json`, envoi Pushover, construction des utilisateurs envoyés à la balance |
+| `aria.php` | Points d'accès **réservés à la balance** (`/scale/register`, `/scale/upload`), journal des échanges, notifications |
 | `webcore.php` | Socle web : session, CSRF, connexion/déconnexion, verrouillage anti-force-brute, mise en page et CSS |
 | `pesees.php` | Page des pesées, graphiques, déplacement/suppression de pesées |
-| `compte.php` | Mot de passe et profil balance |
-| `admin.php` | Administration des utilisateurs |
+| `compte.php` | Mot de passe, notifications, profil balance |
+| `admin.php` | Administration des utilisateurs et réglages Pushover |
 | `data/` | Données (créé automatiquement, voir [Stockage](#stockage-des-données)) |
+| `assets/` | Favicon (`favicon.svg`) et icône de notification Pushover (`pushover-icon-transparent-*.png`, `.svg`) |
+| `docs/screenshots/` | Captures d'écran utilisées dans ce document (données fictives) |
 
 La balance et les navigateurs ne partagent que `lib.php`. Les fichiers `aria.php`, `lib.php` et `webcore.php` ne doivent **jamais** être servis directement aux navigateurs (voir la configuration Apache).
 
@@ -87,6 +131,7 @@ La balance et les navigateurs ne partagent que `lib.php`. Les fichiers `aria.php
 - Un serveur web : **Apache 2.4** (exemples ci-dessous) ou Nginx + PHP-FPM.
 - Le serveur web doit pouvoir **écrire** dans le dossier `data/`.
 - Une balance **Fitbit Aria** en protocole V3, et la possibilité de **rediriger son trafic** vers votre serveur (DNS interne, voir plus bas).
+- Pour les notifications Pushover : le serveur doit pouvoir joindre **`api.pushover.net` en HTTPS** (sortant), et il faut un compte Pushover, un jeton d'application (créé sur pushover.net) et la *User Key* de chaque utilisateur. L'extension PHP `curl` est utilisée si elle est disponible.
 - La balance parle en **HTTP sur le port 80** uniquement ; les navigateurs utiliseront de préférence HTTPS (443).
 
 ---
@@ -161,7 +206,11 @@ C'est possible : la balance n'utilise que le port 80, les navigateurs le port 44
 
 Ouvrir l'interface web, se connecter avec **`admin` / `changeme`** et choisir immédiatement un nouveau mot de passe. Au premier accès, le serveur crée `data/` (ou `DATA_DIR`), `users.json` et le compte administrateur, et importe les utilisateurs de départ (voir `$SEED_USERS` plus bas).
 
-### 5. Créer les utilisateurs
+### 5. Configurer Pushover (facultatif)
+
+Créez une *application* sur pushover.net pour obtenir un **jeton d'API**. Dans **Administration → Notifications Pushover** : saisissez le jeton, cochez « Activer », cochez éventuellement « Alerte de batterie faible » avec un seuil et la clé du destinataire, enregistrez, puis cliquez sur « Envoyer une notification de test ». Chaque utilisateur renseigne ensuite sa propre *User Key* dans **Mon compte** (ou un administrateur le fait dans le panneau « Modifier » de l'utilisateur).
+
+### 6. Créer les utilisateurs
 
 Dans **Administration → Nouvel utilisateur** : nom (20 caractères max., sans accent), poids de départ, année de naissance, sexe, taille, case « Reconnu par la balance » cochée. Un mot de passe provisoire est généré (ou saisi) ; l'utilisateur devra le changer à sa première connexion.
 
@@ -179,10 +228,13 @@ Tout se règle en tête de `lib.php` :
 | `MAX_LOGIN_FAILURES` | `5` | Échecs de connexion avant blocage de l'IP |
 | `LOCKOUT_SECONDS` | `900` | Durée du blocage (secondes) |
 | `WEIGHT_DELTA_G` | `3000` | Demi-largeur de la fourchette de reconnaissance (g) autour de la dernière pesée arrondie au kg inférieur |
+| `PUSHOVER_URL` | `https://api.pushover.net/1/messages.json` | Adresse de l'API Pushover (à modifier seulement pour un serveur de test) |
 | `SEND_PREVIOUS_VALUES` | `false` | Envoyer à la balance les dernières valeurs connues (comme les serveurs de référence, on envoie 0) |
 | `$SEED_USERS` | Cedric, Marie | Utilisateurs importés **une seule fois** à la création de `users.json` ; peut être vidée ensuite |
 | `DEFAULT_ADMIN_NAME` / `DEFAULT_ADMIN_PASSWORD` | `admin` / `changeme` | Compte administrateur initial (changement forcé) |
 | `MIN_PASSWORD_LENGTH` | `10` | Longueur minimale des mots de passe |
+
+Les réglages Pushover (jeton, alerte batterie, seuil, destinataire) ne sont **pas** dans `lib.php` : ils se règlent dans l'administration et sont stockés dans `settings.json`.
 
 Autres réglages dans `pesees.php` : `ROWS_SHOWN` (20 lignes affichées par tableau) et `CHART_POINTS` (60 points maximum par graphique).
 
@@ -208,8 +260,8 @@ Remarque : si vous utilisez un vhost dédié (`balance.exemple.lan` ci-dessus), 
 | Page | Qui | Contenu |
 |---|---|---|
 | `pesees.php` | Tous | Pesées ; choix du graphique ; « Autres pesées » ; actions sur les pesées |
-| `compte.php` | Connecté | Mot de passe ; profil balance |
-| `admin.php` | Administrateurs | Gestion des utilisateurs |
+| `compte.php` | Connecté | Mot de passe ; notifications ; profil balance |
+| `admin.php` | Administrateurs | Gestion des utilisateurs ; réglages Pushover |
 
 ### Droits sur les pesées
 
@@ -235,13 +287,14 @@ Tout est dans `DATA_DIR` :
 
 | Fichier | Contenu |
 |---|---|
-| `users.json` | Utilisateurs (identifiant, nom, hash du mot de passe, rôle, profil balance) et compteur d'identifiants |
+| `users.json` | Utilisateurs (identifiant, nom, hash du mot de passe, rôle, profil balance, clé et appareil Pushover) et compteur d'identifiants |
+| `settings.json` | Jeton d'application Pushover, URL de l'interface, réglages de l'alerte batterie, dernier niveau de batterie par balance |
 | `user_<id>.csv` | Pesées d'un utilisateur |
 | `guests.csv` | Pesées non attribuées (invités) |
 | `deleted_keys.txt` | Clés des pesées supprimées (pour ne pas les recréer) |
 | `exchanges.log` | Journal des échanges avec la balance (JSON, une ligne par échange) |
 | `login_attempts.json` | Échecs de connexion par IP |
-| `.lock`, `.users.lock` | Verrous d'écriture |
+| `.lock`, `.users.lock`, `.settings.lock` | Verrous d'écriture |
 | `.htaccess` | `Require all denied` (si le dossier est sous la racine web) |
 
 ### Format des CSV
@@ -264,7 +317,7 @@ Les écritures sont protégées par verrou et les réécritures passent par un f
 
 Corps en little-endian, terminé par un CRC-16 XMODEM sur 2 octets :
 
-- en-tête : protocole (3), batterie, MAC, code d'authentification (16 octets), firmware, horodatage de la balance, nombre de mesures ;
+- en-tête : protocole (3), batterie (en %), MAC, code d'authentification (16 octets), firmware, horodatage de la balance, nombre de mesures ;
 - puis 32 octets par mesure : `id2`, impédance, poids (g), horodatage, identifiant utilisateur, `fat1`, covariance, `fat2`.
 
 ### Réponse du serveur
@@ -279,10 +332,20 @@ Pour chaque utilisateur : `réf = dernière pesée arrondie au kg inférieur` (o
 
 La balance reçoit un âge ; vous ne saisissez que l'**année de naissance**, l'âge est recalculé automatiquement avec l'année courante.
 
+### Notifications
+
+Après avoir répondu à la balance (`ignore_user_abort` est activé : une coupure de connexion n'empêche pas l'envoi), le serveur :
+
+1. envoie, pour chaque utilisateur qui a de nouvelles pesées, une notification Pushover si Pushover est activé, si l'utilisateur a une clé et si « notifier à chaque pesée » est coché (valeurs masquées et/ou lien vers l'URL de l'interface selon ses choix) ;
+2. mémorise le niveau de batterie de la balance dans `settings.json` et, si l'alerte est activée, que le niveau est inférieur ou égal au seuil et qu'aucune alerte n'est déjà en cours, envoie l'alerte au destinataire configuré. L'alerte n'est marquée « envoyée » que si Pushover l'a acceptée : en cas d'échec, elle est retentée à l'échange suivant.
+
+Une erreur de notification n'a jamais d'effet sur l'enregistrement des pesées ni sur la réponse à la balance.
+
 ---
 
 ## Sécurité
 
+- Le jeton d'application Pushover est stocké en clair dans `settings.json` (jamais réaffiché dans l'interface) : gardez `DATA_DIR` hors de la racine web.
 - **Changez le mot de passe `admin` immédiatement** (le serveur l'impose à la première connexion).
 - **Servez l'interface en HTTPS** : les mots de passe transitent dans les formulaires. Le port 80 n'est utile qu'à la balance.
 - Ne servez pas `aria.php`, `lib.php` ni `webcore.php` sur le nom destiné aux humains (règle `FilesMatch`), et n'exposez pas les scripts web sur le nom de la balance (règle `Require all denied`).
@@ -295,7 +358,7 @@ La balance reçoit un âge ; vous ne saisissez que l'**année de naissance**, l'
 
 ## Sauvegarde et maintenance
 
-- **Sauvegarde** : copiez simplement `DATA_DIR` (CSV, `users.json`, `deleted_keys.txt`).
+- **Sauvegarde** : copiez simplement `DATA_DIR` (CSV, `users.json`, `settings.json`, `deleted_keys.txt`).
 - **Restauration** : remettez le dossier en place, avec les droits du serveur web.
 - **Journal volumineux** : `exchanges.log` grossit à chaque échange ; faites-le tourner avec `logrotate` ou videz-le de temps en temps.
 - **Export** : les CSV s'ouvrent directement dans un tableur ou un script.
@@ -312,6 +375,8 @@ La balance reçoit un âge ; vous ne saisissez que l'**année de naissance**, l'
 | Statut 403 | `ALLOWED_MACS` ne contient pas l'adresse de votre balance |
 | Les pesées vont toutes chez les invités | Poids de départ ou profil de l'utilisateur trop éloigné de son poids réel (fourchette ± 3 kg) ; mettez à jour son poids de départ puis remontez sur la balance |
 | Le nouveau profil n'est pas pris en compte | Il n'est envoyé qu'à l'échange suivant : montez sur la balance une fois |
+| Aucune notification reçue | Pushover non activé ou jeton manquant (Administration), clé utilisateur vide ou « notifier » décoché, serveur incapable de joindre `api.pushover.net` ; consultez les entrées `pushover` de `exchanges.log` et utilisez les boutons de test, qui affichent le message d'erreur de Pushover |
+| Pas d'alerte de batterie | Alerte désactivée, destinataire non renseigné, niveau au-dessus du seuil, ou alerte déjà envoyée (elle repart après un retour au-dessus du seuil + 5 %) |
 | « Trop de tentatives » à la connexion | Blocage de l'IP 15 minutes ; supprimer l'entrée dans `login_attempts.json` pour débloquer plus tôt |
 | Erreur d'écriture / page blanche | Droits d'écriture manquants sur `DATA_DIR` pour l'utilisateur du serveur web |
 | Une pesée supprimée ou déplacée « revient » | Ne doit pas arriver (clé mémorisée) ; vérifier que `deleted_keys.txt` et les CSV sont bien accessibles en écriture |
@@ -322,7 +387,8 @@ La balance reçoit un âge ; vous ne saisissez que l'**année de naissance**, l'
 ## Limites connues
 
 - Conçu pour le protocole **V3 / firmware V35** uniquement ; les autres versions sont refusées (400).
-- Le mode `SEND_PREVIOUS_VALUES = true` n'a pas été vérifié sur une vraie balance : les serveurs de référence envoient 0 et la balance reconnaît quand même les utilisateurs.
+- `SEND_PREVIOUS_VALUES = true` n'a pas été vérifié sur une vraie balance : les serveurs de référence envoient 0 et la balance reconnaît quand même les utilisateurs.
+- Les notifications Pushover ont été testées contre un faux serveur Pushover ; l'envoi réel dépend de votre jeton, de vos clés et de l'accès sortant du serveur. Le champ « batterie » est lu comme un pourcentage (0 à 100) ; une valeur hors de cette plage est ignorée.
 - Le stockage en CSV convient à un usage familial (quelques utilisateurs, quelques milliers de pesées) ; ce n'est pas prévu pour un grand nombre d'utilisateurs.
 - Pas de mot de passe oublié par e-mail : un administrateur réinitialise le mot de passe depuis la page d'administration.
 

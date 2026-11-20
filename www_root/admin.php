@@ -58,6 +58,57 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 flash('Utilisateur « ' . $name . ' » mis à jour.');
                 break;
 
+            case 'save_push':
+                $token = trim((string)($_POST['app_token'] ?? ''));
+                if ($token !== '' && !pushover_key_valid($token)) {
+                    throw new InvalidArgumentException('Jeton d\'application invalide : 30 lettres et chiffres.');
+                }
+                $bkey = trim((string)($_POST['battery_user_key'] ?? ''));
+                if ($bkey !== '' && !pushover_key_valid($bkey)) {
+                    throw new InvalidArgumentException('Clé du destinataire de l\'alerte batterie invalide : 30 lettres et chiffres.');
+                }
+                $uiUrl = trim((string)($_POST['ui_url'] ?? ''));
+                if ($uiUrl !== '' && !ui_url_valid($uiUrl)) {
+                    throw new InvalidArgumentException('URL de l\'interface invalide : adresse complète en http:// ou https:// (512 caractères max.).');
+                }
+                $thr = (int)($_POST['battery_threshold'] ?? 20);
+                if ($thr < 1 || $thr > 99) {
+                    throw new InvalidArgumentException('Seuil de batterie : entre 1 et 99 %.');
+                }
+                $clear  = !empty($_POST['clear_token']);
+                $enable = !empty($_POST['pushover_enabled']);
+                $batOn  = !empty($_POST['battery_alert_enabled']);
+                settings_update(function (array &$st) use ($token, $clear, $enable, $batOn, $bkey, $thr, $uiUrl) {
+                    if ($clear) {
+                        $st['pushover_app_token'] = '';
+                    } elseif ($token !== '') {
+                        $st['pushover_app_token'] = $token;
+                    }
+                    if ($enable && $st['pushover_app_token'] === '') {
+                        throw new InvalidArgumentException('Renseignez le jeton d\'application Pushover pour activer les notifications.');
+                    }
+                    if ($batOn && $bkey === '') {
+                        throw new InvalidArgumentException('Renseignez la clé du destinataire de l\'alerte batterie.');
+                    }
+                    $st['pushover_enabled']      = $enable;
+                    $st['battery_alert_enabled'] = $batOn;
+                    $st['battery_threshold']     = $thr;
+                    $st['battery_user_key']      = $bkey;
+                    $st['ui_url']                = $uiUrl;
+                });
+                flash('Réglages des notifications enregistrés.');
+                break;
+
+            case 'test_push':
+                $cfg = settings_read();
+                $to = ($cfg['battery_user_key'] ?? '') !== '' ? (string)$cfg['battery_user_key'] : (string)($me['pushover_key'] ?? '');
+                if (pushover_send($to, 'Test de notification', 'Les notifications Pushover fonctionnent (envoi depuis l\'administration).')) {
+                    flash('Notification de test envoyée.');
+                } else {
+                    throw new RuntimeException('Échec de l\'envoi : ' . $GLOBALS['pushover_error']);
+                }
+                break;
+
             case 'reset':
                 $id = (int)($_POST['id'] ?? 0);
                 $target = find_user_by_id($id);
@@ -120,6 +171,13 @@ function user_fields(array $u): void
       </select></label>
     <label>Taille (cm)
       <input name="height_cm" inputmode="numeric" value="<?= h($height) ?>"></label>
+    <label class="inline"><input type="checkbox" name="notify_weighing" value="1"<?= ($u['notify_weighing'] ?? false) ? ' checked' : '' ?>> Notifier à chaque nouvelle pesée (Pushover)</label>
+    <label class="inline"><input type="checkbox" name="notify_hide_values" value="1"<?= !empty($u['notify_hide_values']) ? ' checked' : '' ?>> Masquer le poids et la masse grasse dans la notification</label>
+    <label class="inline"><input type="checkbox" name="notify_link" value="1"<?= !empty($u['notify_link']) ? ' checked' : '' ?>> Joindre un lien vers l'interface</label>
+    <label>Clé utilisateur Pushover
+      <input name="pushover_key" value="<?= h($u['pushover_key'] ?? '') ?>" maxlength="30" autocomplete="off" spellcheck="false"></label>
+    <label>Appareil Pushover (facultatif)
+      <input name="pushover_device" value="<?= h($u['pushover_device'] ?? '') ?>" maxlength="25" autocomplete="off" spellcheck="false"></label>
     <?php
 }
 
@@ -167,6 +225,46 @@ $users = load_users();
   <center>Les modifications du profil balance (poids de départ, taille…)<br>sont transmises à la balance à sa prochaine connexion.</center>
 </section>
 
+<?php $cfg = settings_read(); ?>
+<section class="card">
+  <h2>Notifications Pushover</h2>
+  <details<?= !pushover_ready($cfg) ? ' open' : '' ?>>
+    <summary>Réglages</summary>
+    <form method="post" class="stack">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="save_push">
+      <label class="inline"><input type="checkbox" name="pushover_enabled" value="1"<?= !empty($cfg['pushover_enabled']) ? ' checked' : '' ?>> Activer les notifications Pushover</label>
+      <label>Jeton d'application Pushover (API token)
+        <input type="password" name="app_token" autocomplete="off" spellcheck="false" maxlength="30"
+               placeholder="<?= $cfg['pushover_app_token'] !== '' ? '•••••• enregistré — laisser vide pour le conserver' : '30 caractères' ?>"></label>
+      <?php if ($cfg['pushover_app_token'] !== ''): ?>
+        <label class="inline"><input type="checkbox" name="clear_token" value="1"> Effacer le jeton enregistré</label>
+      <?php endif; ?>
+      <label class="inline"><input type="checkbox" name="battery_alert_enabled" value="1"<?= !empty($cfg['battery_alert_enabled']) ? ' checked' : '' ?>> Alerte de batterie faible</label>
+      <label>Seuil d'alerte (%)
+        <input name="battery_threshold" inputmode="numeric" value="<?= (int)$cfg['battery_threshold'] ?>" maxlength="2"></label>
+      <label>Clé Pushover du destinataire de l'alerte (utilisateur ou groupe)
+        <input name="battery_user_key" value="<?= h($cfg['battery_user_key']) ?>" maxlength="30" autocomplete="off" spellcheck="false"></label>
+      <label>URL de l'interface utilisateur (lien joint aux notifications de pesée, facultatif)
+        <input type="url" name="ui_url" value="<?= h($cfg['ui_url']) ?>" maxlength="512" placeholder="https://fitbit.exemple.fr/" autocomplete="off" spellcheck="false"></label>
+      <button type="submit">Enregistrer</button>
+    </form>
+    <div class="row">
+      <form method="post">
+        <?= csrf_field() ?>
+        <input type="hidden" name="action" value="test_push">
+        <button type="submit" class="secondary">Envoyer une notification de test</button>
+      </form>
+    </div>
+    <p class="muted">Le test part vers le destinataire de l'alerte batterie (ou, à défaut, votre propre clé). Les notifications de pesée
+      sont réglées pour chaque utilisateur (« Modifier » ci-dessous, ou « Mon compte »). Le serveur doit pouvoir joindre api.pushover.net en HTTPS.</p>
+  </details>
+  <?php foreach ($cfg['scales'] as $mac => $st): ?>
+    <p class="muted">Balance <?= h($mac) ?> : batterie <?= (int)($st['battery'] ?? 0) ?> %, dernier échange le
+      <?= h(date('d/m/Y H:i', (int)($st['seen'] ?? 0))) ?><?= !empty($st['alerted']) ? ' · alerte envoyée' : '' ?>.</p>
+  <?php endforeach; ?>
+</section>
+
 <?php foreach ($users as $u): ?>
 <section class="card">
   <h2><?= h($u['name']) ?>
@@ -209,7 +307,9 @@ $users = load_users();
     <?= csrf_field() ?>
     <input type="hidden" name="action" value="create">
     <?php user_fields(['name' => '', 'admin' => false, 'on_scale' => true,
-                       'initial_weight_g' => 70000, 'birth_year' => 1990, 'gender' => 0x02, 'height_mm' => 1750]); ?>
+                       'initial_weight_g' => 70000, 'birth_year' => 1990, 'gender' => 0x02, 'height_mm' => 1750,
+                       'notify_weighing' => false, 'notify_hide_values' => false, 'notify_link' => false,
+                       'pushover_key' => '', 'pushover_device' => '']); ?>
     <label>Mot de passe provisoire (laisser vide pour en générer un)
       <input type="text" name="password" autocomplete="off"></label>
     <button type="submit">Créer l'utilisateur</button>

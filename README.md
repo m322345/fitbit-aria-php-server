@@ -11,18 +11,19 @@ French version: [LISEZMOI.md](LISEZMOI.md)
 ## Table of contents
 
 1. [Features](#features)
-2. [Architecture and files](#architecture-and-files)
-3. [Requirements](#requirements)
-4. [Installation](#installation)
-5. [Configuration](#configuration)
-6. [Connecting the scale](#connecting-the-scale)
-7. [Using the web interface](#using-the-web-interface)
-8. [Data storage](#data-storage)
-9. [How it works](#how-it-works)
-10. [Security](#security)
-11. [Backup and maintenance](#backup-and-maintenance)
-12. [Troubleshooting](#troubleshooting)
-13. [Known limitations](#known-limitations)
+2. [Screenshots](#screenshots)
+3. [Architecture and files](#architecture-and-files)
+4. [Requirements](#requirements)
+5. [Installation](#installation)
+6. [Configuration](#configuration)
+7. [Connecting the scale](#connecting-the-scale)
+8. [Using the web interface](#using-the-web-interface)
+9. [Data storage](#data-storage)
+10. [How it works](#how-it-works)
+11. [Security](#security)
+12. [Backup and maintenance](#backup-and-maintenance)
+13. [Troubleshooting](#troubleshooting)
+14. [Known limitations](#known-limitations)
 
 ---
 
@@ -43,6 +44,15 @@ French version: [LISEZMOI.md](LISEZMOI.md)
 - **Global de-duplication**: the scale sometimes re-sends its cached weigh-ins. A weigh-in that is already known, moved or deleted is never recreated.
 - **Full exchange log** scale ⇄ server (`exchanges.log`, one JSON line per exchange: headers, raw bytes in hexadecimal, decoded version, status).
 
+### Pushover notifications
+
+- **New weigh-in**: each user can receive a push notification (weight, difference from the previous weigh-in, body fat) on their phone. Several weigh-ins received in one upload produce a single notification (the most recent). Guests do not get notifications.
+- **Low battery**: an alert is sent when the scale's battery level reaches a configurable threshold (default 20 %). It is sent **once**; it can fire again after the level has risen back above the threshold + 5 % (batteries replaced).
+- Everything is configurable from the web interface, with no file to edit: the Pushover **application token**, the **user key** (and optional device name) of each user, the battery **threshold** and the **recipient key** (user or group) of the battery alert. Each part can be switched off: globally, battery alert only, or per user.
+- Notifications are sent **after** the scale has received its answer, so Pushover never slows the scale down. Results (sent / error) are recorded in `exchanges.log`.
+- "Send a test notification" buttons in *My account* and in the administration.
+- **Link to the interface**: the administrator sets the URL of the user interface (Pushover notifications card). In *My account*, each user can **attach this link** to their weigh-in notifications and/or **hide the weight and body fat** (the notification then only says that a weigh-in was recorded). Both options are unticked by default.
+
 ### Web side
 
 - **Weigh-in page** (`pesees.php`)
@@ -61,9 +71,39 @@ French version: [LISEZMOI.md](LISEZMOI.md)
   - *User*: **release** one of their weigh-ins to the guests; **claim** a guest weigh-in (the "M'attribuer" button).
   - *Administrator*: **move** any weigh-in to any owner (guests included) and **delete** a weigh-in (trash icon, with confirmation).
   - Every action is checked server-side: a user cannot touch other people's weigh-ins, even with a forged request (HTTP 403).
-- **My account** (`compte.php`): password change; for users recognised by the scale, an editable **scale profile** (starting weight, height, birth year, gender), sent to the scale at its next connection.
-- **Administration** (`admin.php`, administrators only): user list, creation (typed or generated temporary password), editing (name, administrator role, recognised by the scale or not, profile), password reset (temporary password shown **only once**, open sessions closed), deletion. Safeguards: you cannot delete your own account, and you cannot remove or delete the **last administrator**. Deleting an account keeps its weigh-in history on the server.
-- **Responsive interface**: tables become cards under 640 px, 44 px touch targets, no horizontal scrolling, automatic light/dark theme. A "Fitbit by Cédric" banner on every page.
+- **My account** (`compte.php`): password change; **Pushover notifications** (enable/disable, user key, device, hide values, link to the interface, test); for users recognised by the scale, an editable **scale profile** (starting weight, height, birth year, gender), sent to the scale at its next connection.
+- **Administration** (`admin.php`, administrators only): user list, creation (typed or generated temporary password), editing (name, administrator role, recognised by the scale or not, profile, Pushover key/device and weigh-in notification), password reset (temporary password shown **only once**, open sessions closed), deletion. A **Pushover notifications** card holds the global settings (application token, battery alert, threshold, recipient, interface URL) and shows the last battery level reported by the scale. Safeguards: you cannot delete your own account, and you cannot remove or delete the **last administrator**. Deleting an account keeps its weigh-in history on the server.
+- **Responsive interface**: tables become cards under 640 px, 44 px touch targets, no horizontal scrolling, automatic light/dark theme. A "Fitbit by Cédric" banner and a bathroom-scale favicon (in the site colours, light and dark) on every page.
+
+---
+
+## Screenshots
+
+All screenshots use fictitious names and measurements.
+
+**Weigh-ins, desktop** – weight and body-fat chart ("Both"), last weigh-ins, and the button to release a weigh-in to the guests:
+
+![Weigh-ins, desktop](docs/screenshots/weighings-desktop.png)
+
+**Weigh-ins, phone** – the table becomes one card per weigh-in:
+
+<img src="docs/screenshots/weighings-mobile.png" alt="Weigh-ins, phone" width="320">
+
+**Weigh-ins, administrator view** – another user's weigh-ins with move (owner list) and delete (trash icon) actions:
+
+![Weigh-ins, administrator view](docs/screenshots/weighings-admin-others.png)
+
+**Administration** – users, and the Pushover notification settings (token, battery alert and threshold, interface URL, last battery level reported by the scale):
+
+![Administration: users and Pushover](docs/screenshots/admin-users-pushover.png)
+
+**Administration, editing a user** – scale profile, Pushover options, password reset and deletion:
+
+![Administration: edit a user](docs/screenshots/admin-edit-user.png)
+
+**My account, notifications** – each user's own Pushover settings:
+
+![My account: notifications](docs/screenshots/account-notifications.png)
 
 ---
 
@@ -71,13 +111,15 @@ French version: [LISEZMOI.md](LISEZMOI.md)
 
 | File | Role |
 |---|---|
-| `lib.php` | Configuration, CRC, CSV reading/writing, de-duplication, moving and deleting weigh-ins, `users.json` management, building the users sent to the scale |
-| `aria.php` | Endpoints **reserved for the scale** (`/scale/register`, `/scale/upload`) and the exchange log |
+| `lib.php` | Configuration, CRC, CSV reading/writing, de-duplication, moving and deleting weigh-ins, `users.json` and `settings.json` management, Pushover sending, building the users sent to the scale |
+| `aria.php` | Endpoints **reserved for the scale** (`/scale/register`, `/scale/upload`) the exchange log and notifications |
 | `webcore.php` | Web foundation: session, CSRF, login/logout, brute-force lockout, layout and CSS |
 | `pesees.php` | Weigh-in page, charts, moving/deleting weigh-ins |
-| `compte.php` | Password and scale profile |
-| `admin.php` | User administration |
+| `compte.php` | Password, notifications and scale profile |
+| `admin.php` | User administration and Pushover settings |
 | `data/` | Data (created automatically, see [Data storage](#data-storage)) |
+| `assets/` | Favicon (`favicon.svg`) and Pushover notification icon (`pushover-icon-transparent-*.png`, `.svg`) |
+| `docs/screenshots/` | Screenshots used in this document (fictitious data) |
 
 The scale and the browsers share only `lib.php`. `aria.php`, `lib.php` and `webcore.php` must **never** be served directly to browsers (see the Apache configuration).
 
@@ -89,6 +131,7 @@ The scale and the browsers share only `lib.php`. `aria.php`, `lib.php` and `webc
 - A web server: **Apache 2.4** (examples below) or Nginx + PHP-FPM.
 - The web server must be able to **write** to the `data/` folder.
 - A **Fitbit Aria** scale using protocol V3, and a way to **redirect its traffic** to your server (internal DNS, see below).
+- For Pushover notifications: the server must be able to reach **`api.pushover.net` over HTTPS** (outbound), and you need a Pushover account, an application token (created on pushover.net) and each user's *User Key*. The PHP `curl` extension is used when available.
 - The scale speaks **plain HTTP on port 80** only; browsers should preferably use HTTPS (443).
 
 ---
@@ -163,7 +206,11 @@ This is possible: the scale only uses port 80, browsers use port 443. With a sin
 
 Open the web interface, log in with **`admin` / `changeme`** and choose a new password right away. On first access the server creates `data/` (or `DATA_DIR`), `users.json` and the administrator account, and imports the starting users (see `$SEED_USERS` below).
 
-### 5. Create the users
+### 5. Set up Pushover (optional)
+
+Create an *application* on pushover.net to get an **API token**. In **Administration → Pushover notifications**: enter the token, tick "Enable", optionally tick "Low battery alert" with a threshold and the recipient key, save, then use "Send a test notification". Each user then enters their own *User Key* in **My account** (or an administrator does it in the user's "Edit" panel).
+
+### 6. Create the users
 
 In **Administration → New user**: name (20 characters max., no accents), starting weight, birth year, gender, height, "Recognised by the scale" ticked. A temporary password is generated (or typed in); the user will have to change it at first login.
 
@@ -181,12 +228,15 @@ Everything is set at the top of `lib.php`:
 | `MAX_LOGIN_FAILURES` | `5` | Failed logins before an IP is blocked |
 | `LOCKOUT_SECONDS` | `900` | Block duration (seconds) |
 | `WEIGHT_DELTA_G` | `3000` | Half-width of the recognition range (g) around the last weigh-in rounded down to the kg |
+| `PUSHOVER_URL` | `https://api.pushover.net/1/messages.json` | Pushover API address (only change it for a test server) |
 | `SEND_PREVIOUS_VALUES` | `false` | Send the last known values to the scale (like the reference servers, 0 is sent) |
 | `$SEED_USERS` | Cedric, Marie | Users imported **only once**, when `users.json` is created; can be emptied afterwards |
 | `DEFAULT_ADMIN_NAME` / `DEFAULT_ADMIN_PASSWORD` | `admin` / `changeme` | Initial administrator account (change forced) |
 | `MIN_PASSWORD_LENGTH` | `10` | Minimum password length |
 
 Other settings in `pesees.php`: `ROWS_SHOWN` (20 rows shown per table) and `CHART_POINTS` (60 points maximum per chart).
+
+The Pushover settings (token, battery alert, threshold, recipient) are **not** in `lib.php`: they are set in the administration and stored in `settings.json`.
 
 If the site is behind a reverse proxy, adapt `client_ip()` in `webcore.php` (it uses `REMOTE_ADDR` by default) so the lockout targets the real client address.
 
@@ -210,8 +260,8 @@ Note: if you use a dedicated vhost (`balance.example.lan` above), it must be the
 | Page | Who | Content |
 |---|---|---|
 | `pesees.php` | Everyone | Weigh-ins; chart choice; "Other weigh-ins"; actions on weigh-ins |
-| `compte.php` | Logged in | Password; scale profile |
-| `admin.php` | Administrators | User management |
+| `compte.php` | Logged in | Password; notifications; scale profile |
+| `admin.php` | Administrators | User management; Pushover settings |
 
 ### Rights on weigh-ins
 
@@ -237,13 +287,14 @@ Everything is in `DATA_DIR`:
 
 | File | Content |
 |---|---|
-| `users.json` | Users (ID, name, password hash, role, scale profile) and the ID counter |
+| `users.json` | Users (ID, name, password hash, role, scale profile, Pushover key and device) and the ID counter |
 | `user_<id>.csv` | A user's weigh-ins |
 | `guests.csv` | Unassigned weigh-ins (guests) |
 | `deleted_keys.txt` | Keys of deleted weigh-ins (so they are not recreated) |
 | `exchanges.log` | Log of exchanges with the scale (JSON, one line per exchange) |
 | `login_attempts.json` | Failed logins per IP |
-| `.lock`, `.users.lock` | Write locks |
+| `settings.json` | Pushover application token, interface URL, battery alert settings, last battery level per scale |
+| `.lock`, `.users.lock`, `.settings.lock` | Write locks |
 | `.htaccess` | `Require all denied` (if the folder is under the web root) |
 
 ### CSV format
@@ -266,7 +317,7 @@ Writes are protected by a lock, and rewrites go through a temporary file followe
 
 Little-endian body, ending with a 2-byte CRC-16 XMODEM:
 
-- header: protocol (3), battery, MAC, authentication code (16 bytes), firmware, scale timestamp, number of measurements;
+- header: protocol (3), battery (in %), MAC, authentication code (16 bytes), firmware, scale timestamp, number of measurements;
 - then 32 bytes per measurement: `id2`, impedance, weight (g), timestamp, user ID, `fat1`, covariance, `fat2`.
 
 ### Server response
@@ -281,10 +332,20 @@ For each user: `ref = last weigh-in rounded down to the kg` (or the starting wei
 
 The scale receives an age; you only enter the **birth year**, and the age is recomputed automatically from the current year.
 
+### Notifications
+
+After answering the scale (`ignore_user_abort` is enabled: a dropped connection does not prevent sending), the server:
+
+1. sends, for each user with new weigh-ins, a Pushover notification if Pushover is enabled, the user has a key and "notify on each weigh-in" is ticked (values hidden and/or link to the interface URL according to the user's choices);
+2. stores the scale's battery level in `settings.json` and, if the alert is enabled, the level is at or below the threshold and no alert is already pending, sends the alert to the configured recipient. The alert is only marked "sent" if Pushover accepted it: on failure it is retried at the next exchange.
+
+A notification error never affects the recording of weigh-ins or the answer to the scale.
+
 ---
 
 ## Security
 
+- The Pushover application token is stored in clear text in `settings.json` (never displayed again in the interface): keep `DATA_DIR` outside the web root.
 - **Change the `admin` password immediately** (the server enforces this at first login).
 - **Serve the interface over HTTPS**: passwords travel in forms. Port 80 is only useful for the scale.
 - Do not serve `aria.php`, `lib.php` or `webcore.php` on the name meant for people (`FilesMatch` rule), and do not expose the web scripts on the scale's name (`Require all denied` rule).
@@ -297,7 +358,7 @@ The scale receives an age; you only enter the **birth year**, and the age is rec
 
 ## Backup and maintenance
 
-- **Backup**: simply copy `DATA_DIR` (CSV files, `users.json`, `deleted_keys.txt`).
+- **Backup**: simply copy `DATA_DIR` (CSV files, `users.json`, `settings.json`, `deleted_keys.txt`).
 - **Restore**: put the folder back, with the web server's permissions.
 - **Large log**: `exchanges.log` grows with every exchange; rotate it with `logrotate` or empty it from time to time.
 - **Export**: the CSV files open directly in a spreadsheet or a script.
@@ -315,6 +376,8 @@ The scale receives an age; you only enter the **birth year**, and the age is rec
 | All weigh-ins go to the guests | The user's starting weight or profile is too far from their real weight (± 3 kg range); update their starting weight, then step on the scale again |
 | The new profile is not taken into account | It is only sent at the next exchange: step on the scale once |
 | "Too many attempts" at login | The IP is blocked for 15 minutes; delete its entry in `login_attempts.json` to unblock sooner |
+| No notification received | Pushover not enabled or token missing (Administration), user key empty or "notify" unticked, server cannot reach `api.pushover.net`; check the `pushover` entries in `exchanges.log` and use the test buttons, which display Pushover's error message |
+| No battery alert | Alert disabled, recipient not set, level above the threshold, or alert already sent (it fires again after the level returns above threshold + 5 %) |
 | Write error / blank page | The web server user lacks write permission on `DATA_DIR` |
 | A deleted or moved weigh-in "comes back" | Should not happen (key remembered); check that `deleted_keys.txt` and the CSV files are writable |
 | Body fat missing (shown as "–") | The scale did not provide a value for that weigh-in (`fat1` at 0); the "Body fat" chart needs at least 2 measurements |
@@ -325,6 +388,7 @@ The scale receives an age; you only enter the **birth year**, and the age is rec
 
 - Designed for **protocol V3 / firmware V35** only; other versions are rejected (400).
 - `SEND_PREVIOUS_VALUES = true` has not been verified on a real scale: the reference servers send 0 and the scale still recognises the users.
+- Pushover notifications were tested against a fake Pushover server; real delivery depends on your token, your keys and the server's outbound access. The "battery" field is read as a percentage (0 to 100); a value outside that range is ignored.
 - CSV storage suits family use (a few users, a few thousand weigh-ins); it is not meant for a large number of users.
 - No "forgotten password" e-mail: an administrator resets the password from the administration page.
 

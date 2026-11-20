@@ -69,6 +69,33 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '')
     redirect('compte.php');
 }
 
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && in_array($_POST['action'] ?? '', ['update_notifications', 'test_notification'], true)) {
+    check_csrf();
+    if ($forced) {
+        flash('Changez d\'abord votre mot de passe.', 'err');
+    } elseif (empty($me['on_scale'])) {
+        http_response_code(403);
+        exit('Aucun profil balance sur ce compte.');
+    } elseif ($_POST['action'] === 'update_notifications') {
+        try {
+            user_patch($me['id'], parse_push_input($_POST));
+            flash('Notifications mises à jour.');
+        } catch (InvalidArgumentException | RuntimeException $e) {
+            flash($e->getMessage(), 'err');
+        }
+    } else {   // test : envoi vers la clé ENREGISTRÉE
+        if (pushover_send((string)($me['pushover_key'] ?? ''), 'Test de notification',
+                          'Les notifications Pushover fonctionnent pour ' . $me['name'] . '.',
+                          ($me['pushover_device'] ?? '') ?: null, null,
+                          ($link = user_push_link($me)), $link ? 'Voir mes pesées' : null)) {
+            flash('Notification de test envoyée.');
+        } else {
+            flash('Échec de l\'envoi : ' . $GLOBALS['pushover_error'], 'err');
+        }
+    }
+    redirect('compte.php');
+}
+
 page_head('Mon compte', $me);
 ?>
 <section class="card">
@@ -126,6 +153,40 @@ page_head('Mon compte', $me);
       </select></label>
     <button type="submit">Enregistrer le profil</button>
   </form>
+  </center>
+</section>
+<section class="card">
+  <h2>Notifications Pushover</h2>
+  <?php if (!pushover_ready()): ?>
+    <p class="msg err">Les notifications Pushover ne sont pas activées par l'administrateur.</p>
+  <?php endif; ?>
+  <p class="muted">Recevez une notification sur votre téléphone à chaque nouvelle pesée. Votre clé utilisateur
+    (« Your User Key ») se trouve sur la page d'accueil de pushover.net ou dans l'application.</p>
+  <center><form method="post" class="stack">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="update_notifications">
+    <label class="inline"><input type="checkbox" name="notify_weighing" value="1"<?= ($me['notify_weighing'] ?? false) ? ' checked' : '' ?>>
+      Me notifier à chaque nouvelle pesée</label>
+    <label class="inline"><input type="checkbox" name="notify_hide_values" value="1"<?= !empty($me['notify_hide_values']) ? ' checked' : '' ?>>
+      Masquer le poids et la masse grasse dans la notification</label>
+    <label class="inline"><input type="checkbox" name="notify_link" value="1"<?= !empty($me['notify_link']) ? ' checked' : '' ?>>
+      Joindre un lien vers l'interface</label>
+    <?php if (trim((string)settings_read()['ui_url']) === ''): ?>
+      <p class="muted" style="margin:-4px 0 0">L'administrateur n'a pas encore configuré l'adresse de l'interface : le lien n'est pas ajouté pour l'instant.</p>
+    <?php endif; ?>
+    <label>Clé utilisateur Pushover (30 caractères)
+      <input name="pushover_key" value="<?= h($me['pushover_key'] ?? '') ?>" maxlength="30" autocomplete="off" spellcheck="false"></label>
+    <label>Nom de l'appareil (facultatif : vide = tous mes appareils)
+      <input name="pushover_device" value="<?= h($me['pushover_device'] ?? '') ?>" maxlength="25" autocomplete="off" spellcheck="false"></label>
+    <button type="submit">Enregistrer les notifications</button>
+  </form>
+  <?php if (($me['pushover_key'] ?? '') !== ''): ?>
+  <form method="post" class="stack" style="margin-top:8px">
+    <?= csrf_field() ?>
+    <input type="hidden" name="action" value="test_notification">
+    <button type="submit" class="secondary">Envoyer une notification de test</button>
+  </form>
+  <?php endif; ?>
   </center>
 </section>
 <?php endif;

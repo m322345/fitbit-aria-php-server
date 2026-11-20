@@ -257,6 +257,7 @@ function page_head(string $title, ?array $user = null): void
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title><?= h($title) ?></title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E %3Cstyle%3E :root %7B --accent:%232563eb%3B --card:%23fff%3B --accent2:%23c2410c%3B %7D %40media (prefers-color-scheme: dark) %7B :root %7B --accent:%237aa7ff%3B --card:%2312161c%3B --accent2:%23fbbf24%3B %7D %7D %3C/style%3E %3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22var(--accent)%22/%3E %3Crect x=%229%22 y=%2212%22 width=%2246%22 height=%2240%22 rx=%229%22 fill=%22var(--card)%22/%3E %3Cpath d=%22M20 31a12 12 0 0 1 24 0%22 fill=%22none%22 stroke=%22var(--accent)%22 stroke-width=%224%22 stroke-linecap=%22round%22/%3E %3Cpath d=%22M32 31l5-8%22 stroke=%22var(--accent2)%22 stroke-width=%223.5%22 stroke-linecap=%22round%22/%3E %3Ccircle cx=%2232%22 cy=%2231%22 r=%223%22 fill=%22var(--accent2)%22/%3E %3Crect x=%2220%22 y=%2240%22 width=%229%22 height=%226%22 rx=%223%22 fill=%22var(--accent)%22 opacity=%22.35%22/%3E %3Crect x=%2235%22 y=%2240%22 width=%229%22 height=%226%22 rx=%223%22 fill=%22var(--accent)%22 opacity=%22.35%22/%3E %3C/svg%3E">
 <style>
 :root { --bg:#f6f7f9; --card:#fff; --text:#1c2430; --muted:#667085; --line:#e4e7ec; --accent:#2563eb; --err:#b42318; --ok:#067647; --accent2:#c2410c; }
 @media (prefers-color-scheme: dark) {
